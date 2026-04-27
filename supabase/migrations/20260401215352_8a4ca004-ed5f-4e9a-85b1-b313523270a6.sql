@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_user_file_hash_uniq ON public.invoices (user_id, file_hash) WHERE file_hash IS NOT NULL;
