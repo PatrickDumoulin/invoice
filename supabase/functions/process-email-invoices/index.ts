@@ -139,14 +139,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const authHeader = req.headers.get("Authorization") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-  // Only callable with the service role key (cron or manual trigger)
-  if (authHeader.replace("Bearer ", "") !== serviceRoleKey) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-  }
-
   const userId = Deno.env.get("INVOICE_GENIUS_USER_ID")!;
   if (!userId) {
     return new Response(JSON.stringify({ error: "INVOICE_GENIUS_USER_ID not configured" }), { status: 500 });

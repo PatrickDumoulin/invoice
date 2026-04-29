@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useUpdateInvoice, useDeleteInvoice } from "@/hooks/useInvoices";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -7,10 +8,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Trash2, FileText, Loader2 } from "lucide-react";
+import { CheckCircle2, Trash2, FileText, Loader2, ExternalLink, Calendar, Tag } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice, InvoiceType } from "@/types";
-import { EXPENSE_OWNERS } from "@/types";
+import { EXPENSE_OWNERS, EXPENSE_CATEGORY_LABELS } from "@/types";
 
 export function InvoiceReviewQueue({ invoices }: { invoices: Invoice[] }) {
   if (invoices.length === 0) {
@@ -35,14 +36,35 @@ export function InvoiceReviewQueue({ invoices }: { invoices: Invoice[] }) {
   );
 }
 
+const fmt = (amount: number, currency = "CAD") =>
+  new Intl.NumberFormat("fr-CA", { style: "currency", currency }).format(amount);
+
 function ReviewCard({ invoice }: { invoice: Invoice }) {
   const [type, setType] = useState<InvoiceType>(invoice.type ?? "expense");
   const [isPartnership, setIsPartnership] = useState(invoice.is_partnership);
   const [expenseOwner, setExpenseOwner] = useState(invoice.expense_owner ?? EXPENSE_OWNERS[0]);
+  const [openingFile, setOpeningFile] = useState(false);
   const update = useUpdateInvoice();
   const deleteInvoice = useDeleteInvoice();
 
   const isLoading = update.isPending || deleteInvoice.isPending;
+  const isAnalyzing = !invoice.company_name && !invoice.amount;
+
+  async function handleView() {
+    if (!invoice.file_path) return;
+    setOpeningFile(true);
+    try {
+      const { data, error } = await supabase.storage
+        .from("invoices")
+        .createSignedUrl(invoice.file_path, 3600);
+      if (error || !data?.signedUrl) throw error;
+      window.open(data.signedUrl, "_blank");
+    } catch {
+      toast.error("Impossible d'ouvrir le fichier");
+    } finally {
+      setOpeningFile(false);
+    }
+  }
 
   async function handleValidate() {
     await update.mutateAsync({
@@ -60,50 +82,92 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
     await deleteInvoice.mutateAsync(invoice.id);
   }
 
-  const displayName = invoice.company_name ?? invoice.file_name ?? "Facture sans nom";
-  const amount =
-    invoice.amount != null
-      ? new Intl.NumberFormat("fr-CA", {
-          style: "currency",
-          currency: invoice.currency ?? "CAD",
-        }).format(invoice.amount)
-      : null;
-
   return (
-    <div className="border rounded-lg p-4 bg-white space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <p className="font-medium truncate">{displayName}</p>
-            <p className="text-xs text-muted-foreground">
-              {invoice.invoice_date
-                ? new Date(invoice.invoice_date).toLocaleDateString("fr-CA")
-                : "Date inconnue"}
-              {invoice.description ? ` · ${invoice.description}` : ""}
-            </p>
+    <div className="border rounded-lg bg-white overflow-hidden">
+      {/* Main info row */}
+      <div className="p-4 flex items-start justify-between gap-4">
+        {/* Left: identity */}
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <FileText className="w-5 h-5 shrink-0 text-muted-foreground mt-0.5" />
+          <div className="min-w-0 space-y-1">
+            {isAnalyzing ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Analyse IA en cours…</span>
+              </div>
+            ) : (
+              <p className="font-semibold text-base leading-tight truncate">
+                {invoice.company_name ?? invoice.file_name ?? "Compagnie inconnue"}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {invoice.invoice_date && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  {new Date(invoice.invoice_date).toLocaleDateString("fr-CA", {
+                    year: "numeric", month: "long", day: "numeric",
+                  })}
+                </span>
+              )}
+              {invoice.expense_category && (
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3 h-3" />
+                  {EXPENSE_CATEGORY_LABELS[invoice.expense_category]}
+                </span>
+              )}
+            </div>
+
+            {invoice.description && (
+              <p className="text-xs text-muted-foreground line-clamp-2">{invoice.description}</p>
+            )}
+
+            <p className="text-xs text-muted-foreground/60 truncate">{invoice.file_name}</p>
           </div>
         </div>
 
-        <div className="shrink-0 text-right">
-          {amount ? (
+        {/* Right: amounts */}
+        <div className="shrink-0 text-right space-y-0.5">
+          {invoice.amount != null ? (
             <>
-              <p className="font-semibold">{amount}</p>
-              {(invoice.tps_amount != null || invoice.tvq_amount != null) && (
-                <p className="text-xs text-muted-foreground">
-                  TPS {invoice.tps_amount?.toFixed(2) ?? "—"} · TVQ {invoice.tvq_amount?.toFixed(2) ?? "—"}
-                </p>
+              <p className="text-lg font-bold tabular-nums">
+                {fmt(invoice.amount, invoice.currency ?? "CAD")}
+              </p>
+              {invoice.currency && invoice.currency !== "CAD" && invoice.amount_cad != null && (
+                <p className="text-xs text-muted-foreground">≈ {fmt(invoice.amount_cad)} CAD</p>
               )}
+              <div className="text-xs text-muted-foreground space-y-0.5 pt-0.5">
+                {invoice.tps_amount != null && invoice.tps_amount > 0 && (
+                  <p>TPS {fmt(invoice.tps_amount)}</p>
+                )}
+                {invoice.tvq_amount != null && invoice.tvq_amount > 0 && (
+                  <p>TVQ {fmt(invoice.tvq_amount)}</p>
+                )}
+              </div>
             </>
           ) : (
-            <Badge variant="outline" className="text-xs">Montant non extrait</Badge>
+            !isAnalyzing && (
+              <Badge variant="outline" className="text-xs">Montant non extrait</Badge>
+            )
           )}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 pt-2 border-t">
+      {/* Controls row */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t bg-muted/30">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleView}
+          disabled={openingFile || !invoice.file_path}
+          className="gap-1.5 h-8"
+        >
+          {openingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
+          Voir
+        </Button>
+
         <Select value={type} onValueChange={(v) => setType(v as InvoiceType)}>
-          <SelectTrigger className="h-8 w-36 text-xs">
+          <SelectTrigger className="h-8 w-32 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -112,11 +176,12 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
           </SelectContent>
         </Select>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Switch
             id={`partnership-${invoice.id}`}
             checked={isPartnership}
             onCheckedChange={setIsPartnership}
+            className="scale-90"
           />
           <Label htmlFor={`partnership-${invoice.id}`} className="text-xs cursor-pointer">
             Partenariat
@@ -125,7 +190,7 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
 
         {isPartnership && (
           <Select value={expenseOwner} onValueChange={setExpenseOwner}>
-            <SelectTrigger className="h-8 w-36 text-xs">
+            <SelectTrigger className="h-8 w-32 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -142,7 +207,7 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
             size="sm"
             onClick={handleReject}
             disabled={isLoading}
-            className="gap-1.5 text-destructive hover:text-destructive hover:border-destructive"
+            className="gap-1.5 h-8 text-destructive hover:text-destructive hover:border-destructive"
           >
             <Trash2 className="w-3.5 h-3.5" />
             Rejeter
@@ -150,14 +215,13 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
           <Button
             size="sm"
             onClick={handleValidate}
-            disabled={isLoading}
-            className="gap-1.5"
+            disabled={isLoading || isAnalyzing}
+            className="gap-1.5 h-8"
           >
-            {update.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            )}
+            {update.isPending
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <CheckCircle2 className="w-3.5 h-3.5" />
+            }
             Valider
           </Button>
         </div>
