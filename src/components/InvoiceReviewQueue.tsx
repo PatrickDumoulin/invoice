@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useUpdateInvoice, useDeleteInvoice } from "@/hooks/useInvoices";
+import { useUpdateInvoice, useDeleteInvoice, useAnalyzeInvoice } from "@/hooks/useInvoices";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Trash2, FileText, Loader2, ExternalLink, Calendar, Tag } from "lucide-react";
+import { CheckCircle2, Trash2, FileText, Loader2, ExternalLink, Calendar, Tag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice, InvoiceType } from "@/types";
 import { EXPENSE_OWNERS, EXPENSE_CATEGORY_LABELS } from "@/types";
@@ -46,8 +46,14 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
   const [openingFile, setOpeningFile] = useState(false);
   const update = useUpdateInvoice();
   const deleteInvoice = useDeleteInvoice();
+  const analyze = useAnalyzeInvoice();
 
-  const isLoading = update.isPending || deleteInvoice.isPending;
+  const isLoading = update.isPending || deleteInvoice.isPending || analyze.isPending;
+
+  async function handleAnalyze() {
+    await analyze.mutateAsync(invoice.id);
+    toast.success("Analyse terminée");
+  }
 
   async function handleView() {
     if (!invoice.file_path) return;
@@ -156,6 +162,17 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
         >
           {openingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
           Voir
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleAnalyze}
+          disabled={isLoading}
+          className="gap-1.5 h-8"
+        >
+          {analyze.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+          {analyze.isPending ? "Analyse…" : "Analyser"}
         </Button>
 
         <Select value={type} onValueChange={(v) => setType(v as InvoiceType)}>
