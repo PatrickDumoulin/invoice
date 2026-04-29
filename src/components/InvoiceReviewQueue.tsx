@@ -138,9 +138,7 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
               </div>
             </>
           ) : (
-            !isAnalyzing && (
-              <Badge variant="outline" className="text-xs">Montant non extrait</Badge>
-            )
+            <Badge variant="outline" className="text-xs">Montant non extrait</Badge>
           )}
         </div>
       </div>
