@@ -51,7 +51,7 @@ async function getOrCreateLabel(token: string): Promise<string> {
 
 async function searchMessages(token: string, labelId: string): Promise<string[]> {
   // Attachments only, excluding already-processed emails
-  const query = `has:attachment -label:${GMAIL_LABEL_NAME}`;
+  const query = `has:attachment -label:${GMAIL_LABEL_NAME} newer_than:2d`;
   const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const data = await res.json();
