@@ -48,7 +48,6 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
   const deleteInvoice = useDeleteInvoice();
 
   const isLoading = update.isPending || deleteInvoice.isPending;
-  const isAnalyzing = !invoice.company_name && !invoice.amount;
 
   async function handleView() {
     if (!invoice.file_path) return;
@@ -90,16 +89,9 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <FileText className="w-5 h-5 shrink-0 text-muted-foreground mt-0.5" />
           <div className="min-w-0 space-y-1">
-            {isAnalyzing ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Analyse IA en cours…</span>
-              </div>
-            ) : (
-              <p className="font-semibold text-base leading-tight truncate">
-                {invoice.company_name ?? invoice.file_name ?? "Compagnie inconnue"}
-              </p>
-            )}
+            <p className="font-semibold text-base leading-tight truncate">
+              {invoice.company_name ?? invoice.file_name ?? "Compagnie inconnue"}
+            </p>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {invoice.invoice_date && (
@@ -215,7 +207,7 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
           <Button
             size="sm"
             onClick={handleValidate}
-            disabled={isLoading || isAnalyzing}
+            disabled={isLoading}
             className="gap-1.5 h-8"
           >
             {update.isPending

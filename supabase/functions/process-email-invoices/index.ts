@@ -220,12 +220,6 @@ Deno.serve(async (req) => {
 
           if (dbError) throw new Error(`DB insert: ${dbError.message}`);
 
-          // Trigger Claude analysis synchronously — status stays pending_review
-          const { error: analyzeError } = await supabase.functions.invoke("analyze-invoice", {
-            body: { invoiceId: invoice.id, userId },
-          });
-          if (analyzeError) console.error(`analyze-invoice error for ${invoice.id}:`, analyzeError);
-
           processed++;
         }
 
