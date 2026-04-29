@@ -1,5 +1,5 @@
 export type InvoiceType = "expense" | "revenue";
-export type InvoiceStatus = "pending" | "processed" | "error";
+export type InvoiceStatus = "pending" | "processed" | "error" | "pending_review";
 export type AppRole = "admin" | "partner";
 export type Currency = "CAD" | "USD" | "EUR" | "GBP" | "AUD" | "JPY" | "CHF" | "MXN";
 

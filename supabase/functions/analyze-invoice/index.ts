@@ -185,19 +185,11 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceKey);
-    const anonClient = createClient(supabaseUrl, anonKey);
 
-    const { data: { user }, error: userError } = await anonClient.auth.getUser(
-      authHeader.replace("Bearer ", "")
-    );
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Parse body first — needed before auth for internal server-to-server calls
+    const body = await req.json();
+    const { invoiceId, userId: requestUserId } = body;
 
-    const { invoiceId } = await req.json();
     if (!invoiceId) {
       return new Response(JSON.stringify({ error: "Missing invoiceId" }), {
         status: 400,
@@ -205,11 +197,35 @@ serve(async (req) => {
       });
     }
 
+    // Auth: user JWT (frontend calls) or service role key (internal Edge Function calls)
+    const authToken = authHeader.replace("Bearer ", "");
+    let userId: string;
+
+    if (authToken === serviceKey) {
+      if (!requestUserId) {
+        return new Response(JSON.stringify({ error: "userId required for internal calls" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = requestUserId;
+    } else {
+      const anonClient = createClient(supabaseUrl, anonKey);
+      const { data: { user }, error: userError } = await anonClient.auth.getUser(authToken);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
       .select("*")
       .eq("id", invoiceId)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
 
     if (invoiceError || !invoice) {
@@ -353,7 +369,7 @@ serve(async (req) => {
         tvq_amount: extracted.tvq_amount ?? 0,
         expense_category: extracted.expense_category ?? null,
         raw_extraction: extracted,
-        status: "processed",
+        status: invoice.status === "pending_review" ? "pending_review" : "processed",
       })
       .eq("id", invoiceId);
 
