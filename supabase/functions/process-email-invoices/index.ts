@@ -3,10 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const GMAIL_LABEL_NAME = "Invoice Genius";
 const ACCEPTED_MIME_TYPES = [
   "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
 ];
 
 // ─── Gmail helpers ────────────────────────────────────────────────────────────
