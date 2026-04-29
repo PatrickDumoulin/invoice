@@ -52,7 +52,7 @@ async function getOrCreateLabel(token: string): Promise<string> {
 async function searchMessages(token: string, labelId: string): Promise<string[]> {
   // Attachments only, excluding already-processed emails
   const query = `has:attachment -label:${GMAIL_LABEL_NAME}`;
-  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=25`;
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const data = await res.json();
   return (data.messages ?? []).map((m: { id: string }) => m.id);
@@ -224,12 +224,11 @@ Deno.serve(async (req) => {
 
           if (dbError) throw new Error(`DB insert: ${dbError.message}`);
 
-          // Trigger Claude analysis asynchronously — status stays pending_review
-          supabase.functions
-            .invoke("analyze-invoice", {
-              body: { invoiceId: invoice.id, userId },
-            })
-            .catch((e) => console.error(`analyze-invoice error for ${invoice.id}:`, e));
+          // Trigger Claude analysis synchronously — status stays pending_review
+          const { error: analyzeError } = await supabase.functions.invoke("analyze-invoice", {
+            body: { invoiceId: invoice.id, userId },
+          });
+          if (analyzeError) console.error(`analyze-invoice error for ${invoice.id}:`, analyzeError);
 
           processed++;
         }
