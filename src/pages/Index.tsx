@@ -30,8 +30,7 @@ export function Index() {
       invoices.filter(
         (i) =>
           i.status !== "pending_review" &&
-          i.invoice_date &&
-          new Date(i.invoice_date).getFullYear() === year
+          (!i.invoice_date || new Date(i.invoice_date).getFullYear() === year)
       ),
     [invoices, year]
   );

@@ -72,6 +72,8 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
       type,
       is_partnership: isPartnership,
       expense_owner: expenseOwner,
+      // Default to today if no date was extracted
+      invoice_date: invoice.invoice_date ?? new Date().toISOString().split("T")[0],
     });
     toast.success(`« ${invoice.company_name ?? invoice.file_name} » validée`);
   }
