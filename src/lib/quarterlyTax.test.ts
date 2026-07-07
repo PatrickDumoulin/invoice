@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getQuarterPeriods, computeQuarterData } from "./QuarterlyTaxDeclaration";
+import { getQuarterPeriods, computeQuarterData } from "./quarterlyTax";
 import type { Invoice } from "@/types";
 
 function inv(overrides: Partial<Invoice>): Invoice {
