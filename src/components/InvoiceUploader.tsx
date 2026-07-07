@@ -78,9 +78,12 @@ export function InvoiceUploader({ existingInvoices }: { existingInvoices: Invoic
     addFiles(e.dataTransfer.files);
   }
 
-  async function processItem(item: UploadItem) {
+  async function processItem(item: UploadItem): Promise<UploadItem["status"]> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      updateItem(item.id, { status: "error", error: "Non connecté" });
+      return "error";
+    }
 
     updateItem(item.id, { status: "uploading", progress: 10 });
 
@@ -94,7 +97,7 @@ export function InvoiceUploader({ existingInvoices }: { existingInvoices: Invoic
           error: `Fichier identique à « ${hashDuplicate.company_name ?? hashDuplicate.file_name} »`,
           duplicateOf: hashDuplicate.id,
         });
-        return;
+        return "duplicate";
       }
 
       const timestamp = Date.now();
@@ -134,16 +137,28 @@ export function InvoiceUploader({ existingInvoices }: { existingInvoices: Invoic
 
       updateItem(item.id, { status: "done", progress: 100 });
       qc.invalidateQueries({ queryKey: ["invoices"] });
+      return "done";
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur inconnue";
       updateItem(item.id, { status: "error", error: message });
       toast.error(`Échec pour ${item.file.name}: ${message}`);
+      return "error";
     }
   }
 
   async function processAll() {
     const pending = items.filter((i) => i.status === "pending");
-    await Promise.allSettled(pending.map(processItem));
+    const results = await Promise.allSettled(pending.map(processItem));
+    const succeeded = results.filter((r) => r.status === "fulfilled" && r.value === "done").length;
+    const failed = results.length - succeeded;
+
+    if (failed === 0) {
+      toast.success(`${succeeded} facture(s) traitée(s) avec succès`);
+    } else if (succeeded === 0) {
+      toast.error(`${failed} facture(s) en échec — voir les détails ci-dessous`);
+    } else {
+      toast.warning(`${succeeded} facture(s) traitée(s), ${failed} en échec — voir les badges ci-dessous`);
+    }
   }
 
   function removeItem(id: string) {

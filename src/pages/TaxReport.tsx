@@ -11,11 +11,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { computeHT, formatCurrency, formatDateShort, isAfterDate } from "@/lib/utils";
-import { EXPENSE_CATEGORY_LABELS, TAX_REGISTRATION_DATE, type Invoice } from "@/types";
+import { computeHT, dateYear, formatCurrency, formatDateShort } from "@/lib/utils";
+import { computeTaxLineTotals, computeExpenseCategoryBreakdown } from "@/lib/taxCalculations";
+import { EXPENSE_CATEGORY_LABELS, type Invoice } from "@/types";
 import { Download, FileText } from "lucide-react";
-import { saveAs } from "file-saver";
-import { jsPDF } from "jspdf";
 
 const currentYear = new Date().getFullYear();
 const YEARS = [currentYear, currentYear - 1, currentYear - 2];
@@ -26,7 +25,7 @@ export function TaxReport() {
   const { data: assets = [] } = useAssets();
 
   const yearInvoices = useMemo(
-    () => invoices.filter((i) => i.invoice_date && new Date(i.invoice_date).getFullYear() === year),
+    () => invoices.filter((i) => dateYear(i.invoice_date) === year),
     [invoices, year]
   );
 
@@ -35,24 +34,11 @@ export function TaxReport() {
     [assets, year]
   );
 
-  function exportPDF() {
+  async function exportPDF() {
     const revenues = yearInvoices.filter((i) => i.type === "revenue");
     const expenses = yearInvoices.filter((i) => i.type === "expense");
 
-    const tpsCollected = revenues
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tps_amount ?? 0), 0);
-    const tvqCollected = revenues
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tvq_amount ?? 0), 0);
-    const tpsCTI = expenses
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tps_amount ?? 0), 0);
-    const tvqRTI = expenses
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tvq_amount ?? 0), 0);
-    const tpsNet = tpsCollected - tpsCTI;
-    const tvqNet = tvqCollected - tvqRTI;
+    const { tpsCollected, tvqCollected, tpsCTI, tvqRTI, tpsNet, tvqNet } = computeTaxLineTotals(yearInvoices);
 
     const totalRevenue = revenues.reduce(
       (s, i) => s + computeHT(i.amount_cad, i.tps_amount, i.tvq_amount), 0
@@ -62,25 +48,12 @@ export function TaxReport() {
     );
     const beneficeNet = totalRevenue - totalExpenses - totalCCA;
 
-    const catMap = new Map<string, { total: number; count: number; tps: number; tvq: number }>();
-    for (const inv of expenses) {
-      const cat = inv.expense_category ?? "non_categorise";
-      const entry = catMap.get(cat) ?? { total: 0, count: 0, tps: 0, tvq: 0 };
-      entry.total += computeHT(inv.amount_cad, inv.tps_amount, inv.tvq_amount);
-      entry.count += 1;
-      if (isAfterDate(inv.invoice_date, TAX_REGISTRATION_DATE)) {
-        entry.tps += inv.tps_amount ?? 0;
-        entry.tvq += inv.tvq_amount ?? 0;
-      }
-      catMap.set(cat, entry);
-    }
-    const categories = Array.from(catMap.entries())
-      .sort(([, a], [, b]) => b.total - a.total)
-      .map(([cat, data]) => ({
-        label: EXPENSE_CATEGORY_LABELS[cat as keyof typeof EXPENSE_CATEGORY_LABELS] ?? cat,
-        ...data,
-      }));
+    const categories = computeExpenseCategoryBreakdown(yearInvoices).map((entry) => ({
+      label: EXPENSE_CATEGORY_LABELS[entry.cat as keyof typeof EXPENSE_CATEGORY_LABELS] ?? entry.cat,
+      ...entry,
+    }));
 
+    const [{ jsPDF }, { saveAs }] = await Promise.all([import("jspdf"), import("file-saver")]);
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const PW = 210;
     const L = 15;
@@ -235,7 +208,8 @@ export function TaxReport() {
     saveAs(doc.output("blob"), `rapport_fiscal_${year}.pdf`);
   }
 
-  function exportCSV() {
+  async function exportCSV() {
+    const { saveAs } = await import("file-saver");
     const headers = [
       "Date", "Compagnie", "Type", "Catégorie", "Description",
       "Montant orig.", "Devise", "Taux change", "Montant CAD",
@@ -396,29 +370,7 @@ function DepreciationTab({
 }
 
 function CategoryBreakdown({ invoices }: { invoices: Invoice[] }) {
-  const byCategory = useMemo(() => {
-    const map = new Map<string, { total: number; count: number; tps: number; tvq: number }>();
-    for (const inv of invoices) {
-      if (inv.type !== "expense") continue;
-      const cat = inv.expense_category ?? "non_categorise";
-      const entry = map.get(cat) ?? { total: 0, count: 0, tps: 0, tvq: 0 };
-      entry.total += computeHT(inv.amount_cad, inv.tps_amount, inv.tvq_amount);
-      entry.count += 1;
-      // CTI/RTI uniquement pour les factures après inscription aux taxes
-      if (isAfterDate(inv.invoice_date, TAX_REGISTRATION_DATE)) {
-        entry.tps += inv.tps_amount ?? 0;
-        entry.tvq += inv.tvq_amount ?? 0;
-      }
-      map.set(cat, entry);
-    }
-    return Array.from(map.entries())
-      .sort(([, a], [, b]) => b.total - a.total)
-      .map(([cat, data]) => ({
-        cat,
-        label: EXPENSE_CATEGORY_LABELS[cat as keyof typeof EXPENSE_CATEGORY_LABELS] ?? cat,
-        ...data,
-      }));
-  }, [invoices]);
+  const byCategory = useMemo(() => computeExpenseCategoryBreakdown(invoices), [invoices]);
 
   const revenues = invoices.filter((i) => i.type === "revenue");
   const totalRevenue = revenues.reduce((s, i) => s + (i.amount_cad ?? 0), 0);

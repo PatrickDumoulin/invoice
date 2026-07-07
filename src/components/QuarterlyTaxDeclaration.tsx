@@ -5,11 +5,10 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, computeHT, isAfterDate } from "@/lib/utils";
-import { TAX_REGISTRATION_DATE, type Invoice } from "@/types";
-import { Info, Copy, FileText } from "lucide-react";
+import { TAX_REGISTRATION_DATE, type Invoice, type TaxFiling } from "@/types";
+import { useTaxFilings, useMarkFiled, useUnmarkFiled } from "@/hooks/useTaxFilings";
+import { Info, Copy, FileText, CheckCircle2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
-import { jsPDF } from "jspdf";
-import { saveAs } from "file-saver";
 
 const QUARTER_LABELS = [
   "T1 — janvier à mars",
@@ -27,28 +26,47 @@ function fmtDate(d: Date): string {
   return `${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-interface QuarterPeriod {
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// invoice_date is a SQL DATE ("YYYY-MM-DD"), which `new Date(...)` parses as UTC midnight.
+// Period boundaries below are built as local dates for display purposes, so all filtering
+// must compare via this ISO string form instead of Date objects — otherwise an invoice dated
+// exactly on a quarter boundary (e.g. April 1st) can fall in the UTC/local gap and be silently
+// dropped from every quarter.
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+export interface QuarterPeriod {
   q: 1 | 2 | 3 | 4;
   label: string;
   start: Date;
   end: Date;
   deadline: Date;
+  startISO: string;
+  endISO: string;
 }
 
-function getQuarterPeriods(year: number): QuarterPeriod[] {
+export function getQuarterPeriods(year: number): QuarterPeriod[] {
   return [1, 2, 3, 4].map((q) => {
     const startMonth = (q - 1) * 3;
+    const start = new Date(year, startMonth, 1);
+    const end = new Date(year, startMonth + 3, 0);
     return {
       q: q as 1 | 2 | 3 | 4,
       label: QUARTER_LABELS[q - 1],
-      start: new Date(year, startMonth, 1),
-      end: new Date(year, startMonth + 3, 0),
+      start,
+      end,
       deadline: new Date(year, startMonth + 4, 0),
+      startISO: isoLocal(start),
+      endISO: isoLocal(end),
     };
   });
 }
 
-interface QuarterData {
+export interface QuarterData {
   invoiceCount: number;
   excludedPreRegistration: number;
   line101: number;
@@ -61,11 +79,10 @@ interface QuarterData {
   total: number;
 }
 
-function computeQuarterData(invoices: Invoice[], period: QuarterPeriod): QuarterData {
+export function computeQuarterData(invoices: Invoice[], period: QuarterPeriod): QuarterData {
   const inQuarter = invoices.filter((i) => {
     if (!i.invoice_date) return false;
-    const d = new Date(i.invoice_date);
-    return d >= period.start && d <= period.end;
+    return i.invoice_date >= period.startISO && i.invoice_date <= period.endISO;
   });
   const taxable = inQuarter.filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE));
   const revenues = taxable.filter((i) => i.type === "revenue");
@@ -88,9 +105,13 @@ function computeQuarterData(invoices: Invoice[], period: QuarterPeriod): Quarter
 }
 
 function statusOf(period: QuarterPeriod, today: Date): { label: string; variant: "outline" | "default" | "destructive" | "secondary" } {
-  if (today < period.start) return { label: "À venir", variant: "outline" };
-  if (today <= period.end) return { label: "En cours", variant: "secondary" };
-  if (today <= period.deadline) return { label: `À produire — avant le ${fmtDate(period.deadline)}`, variant: "default" };
+  // Compare by local calendar day (not instant) so the whole last day of a period still
+  // counts as "within" it — period.end/deadline are Date objects at 00:00:00 of that day.
+  const todayISO = isoLocal(today);
+  const deadlineISO = isoLocal(period.deadline);
+  if (todayISO < period.startISO) return { label: "À venir", variant: "outline" };
+  if (todayISO <= period.endISO) return { label: "En cours", variant: "secondary" };
+  if (todayISO <= deadlineISO) return { label: `À produire — avant le ${fmtDate(period.deadline)}`, variant: "default" };
   return { label: `Échéance dépassée (${fmtDate(period.deadline)})`, variant: "destructive" };
 }
 
@@ -135,10 +156,16 @@ function LineRow({ line, label, value, bold }: { line: string; label: string; va
   );
 }
 
-function QuarterCard({ period, data, year, today }: { period: QuarterPeriod; data: QuarterData; year: number; today: Date }) {
+function QuarterCard({ period, data, year, today, filing }: { period: QuarterPeriod; data: QuarterData; year: number; today: Date; filing?: TaxFiling }) {
   const status = statusOf(period, today);
   const isRefund = data.total < -0.005;
   const isNil = Math.abs(data.total) <= 0.005;
+  const markFiled = useMarkFiled();
+  const unmarkFiled = useUnmarkFiled();
+
+  const amountsChangedSinceFiling =
+    filing != null &&
+    (Math.abs((filing.net_tps ?? 0) - data.line109) > 0.01 || Math.abs((filing.net_tvq ?? 0) - data.line209) > 0.01);
 
   function copySummary() {
     navigator.clipboard.writeText(buildSummaryText(period, data, year));
@@ -155,10 +182,28 @@ function QuarterCard({ period, data, year, today }: { period: QuarterPeriod; dat
               Du {fmtDate(period.start)} au {fmtDate(period.end)} · Échéance : {fmtDate(period.deadline)}
             </span>
           </span>
-          <Badge variant={status.variant}>{status.label}</Badge>
+          {filing ? (
+            <Badge variant="success" className="gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              Déclaré le {new Date(filing.filed_at).toLocaleDateString("fr-CA", { year: "numeric", month: "short", day: "numeric" })}
+            </Badge>
+          ) : (
+            <Badge variant={status.variant}>{status.label}</Badge>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {amountsChangedSinceFiling && (
+          <Alert variant="warning">
+            <Info className="w-4 h-4" />
+            <AlertDescription>
+              Les factures de cette période ont changé depuis la déclaration : à l'époque TPS {formatCurrency(filing!.net_tps ?? 0)} /
+              TVQ {formatCurrency(filing!.net_tvq ?? 0)}, maintenant TPS {formatCurrency(data.line109)} / TVQ {formatCurrency(data.line209)}.
+              Une déclaration de redressement pourrait être nécessaire.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {data.excludedPreRegistration > 0 && (
           <Alert variant="warning">
             <Info className="w-4 h-4" />
@@ -208,16 +253,43 @@ function QuarterCard({ period, data, year, today }: { period: QuarterPeriod; dat
           </p>
         </div>
 
-        <Button variant="outline" size="sm" onClick={copySummary} className="gap-1.5">
-          <Copy className="w-3.5 h-3.5" />
-          Copier le résumé (quoi écrire)
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={copySummary} className="gap-1.5">
+            <Copy className="w-3.5 h-3.5" />
+            Copier le résumé (quoi écrire)
+          </Button>
+
+          {filing ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={unmarkFiled.isPending}
+              onClick={() => unmarkFiled.mutate({ year, quarter: period.q })}
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              Annuler la déclaration
+            </Button>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              className="gap-1.5"
+              disabled={markFiled.isPending}
+              onClick={() => markFiled.mutate({ year, quarter: period.q, net_tps: data.line109, net_tvq: data.line209 })}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Marquer {period.label.split(" —")[0]} comme déclaré
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function exportQuarterlyPDF(periods: QuarterPeriod[], dataByQuarter: QuarterData[], year: number) {
+async function exportQuarterlyPDF(periods: QuarterPeriod[], dataByQuarter: QuarterData[], year: number) {
+  const [{ jsPDF }, { saveAs }] = await Promise.all([import("jspdf"), import("file-saver")]);
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const PW = 210;
   const L = 15;
@@ -329,8 +401,9 @@ export function QuarterlyTaxDeclaration({ invoices, year }: { invoices: Invoice[
   const today = useMemo(() => new Date(), []);
   const periods = useMemo(() => getQuarterPeriods(year), [year]);
   const registrationDate = useMemo(() => new Date(TAX_REGISTRATION_DATE), []);
+  const { data: filings = [] } = useTaxFilings();
 
-  const visiblePeriods = periods.filter((p) => p.end >= registrationDate);
+  const visiblePeriods = periods.filter((p) => p.endISO >= TAX_REGISTRATION_DATE);
   const dataByQuarter = visiblePeriods.map((p) => computeQuarterData(invoices, p));
 
   if (visiblePeriods.length === 0) {
@@ -368,7 +441,14 @@ export function QuarterlyTaxDeclaration({ invoices, year }: { invoices: Invoice[
       </div>
 
       {visiblePeriods.map((period, idx) => (
-        <QuarterCard key={period.q} period={period} data={dataByQuarter[idx]} year={year} today={today} />
+        <QuarterCard
+          key={period.q}
+          period={period}
+          data={dataByQuarter[idx]}
+          year={year}
+          today={today}
+          filing={filings.find((f) => f.year === year && f.quarter === period.q)}
+        />
       ))}
     </div>
   );

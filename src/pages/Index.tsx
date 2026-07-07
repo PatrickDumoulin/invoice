@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { dateYear } from "@/lib/utils";
 import { List, Upload, BarChart3, Inbox } from "lucide-react";
 
 const currentYear = new Date().getFullYear();
@@ -30,7 +31,7 @@ export function Index() {
       invoices.filter(
         (i) =>
           i.status !== "pending_review" &&
-          (!i.invoice_date || new Date(i.invoice_date).getFullYear() === year)
+          (!i.invoice_date || dateYear(i.invoice_date) === year)
       ),
     [invoices, year]
   );

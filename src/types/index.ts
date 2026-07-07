@@ -73,6 +73,18 @@ export interface TaxDocument {
   created_at: string;
 }
 
+export interface TaxFiling {
+  id: string;
+  user_id: string;
+  year: number;
+  quarter: 1 | 2 | 3 | 4;
+  filed_at: string;
+  net_tps: number | null;
+  net_tvq: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface PartnershipReimbursement {
   id: string;
   user_id: string;

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Asset } from "@/types";
+import { dateYear } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function useAssets() {
@@ -53,7 +54,7 @@ export function useDeleteAsset() {
 }
 
 export function computeCCA(asset: Asset, taxYear: number): number {
-  const purchaseYear = new Date(asset.purchase_date).getFullYear();
+  const purchaseYear = dateYear(asset.purchase_date) ?? new Date().getFullYear();
   if (purchaseYear > taxYear) return 0;
 
   const rate = asset.depreciation_rate / 100;

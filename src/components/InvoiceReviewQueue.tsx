@@ -106,7 +106,7 @@ function ReviewCard({ invoice }: { invoice: Invoice }) {
                 <span className="flex items-center gap-1">
                   <Calendar className="w-3 h-3" />
                   {new Date(invoice.invoice_date).toLocaleDateString("fr-CA", {
-                    year: "numeric", month: "long", day: "numeric",
+                    year: "numeric", month: "long", day: "numeric", timeZone: "UTC",
                   })}
                 </span>
               )}

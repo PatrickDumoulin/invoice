@@ -3,38 +3,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { formatCurrency, isAfterDate } from "@/lib/utils";
-import { TAX_REGISTRATION_DATE, TPS_RATE, TVQ_RATE, type Invoice } from "@/types";
+import { dateYear, formatCurrency, isAfterDate } from "@/lib/utils";
+import { computeTaxLineTotals } from "@/lib/taxCalculations";
+import { TAX_REGISTRATION_DATE, type Invoice } from "@/types";
 import { Info } from "lucide-react";
 
 export function TaxSummary({ invoices, year, totalCCA = 0 }: { invoices: Invoice[]; year: number; totalCCA?: number }) {
   const stats = useMemo(() => {
     const yearInvoices = invoices.filter((i) => {
       if (!i.invoice_date) return false;
-      return new Date(i.invoice_date).getFullYear() === year;
+      return dateYear(i.invoice_date) === year;
     });
 
     const revenues = yearInvoices.filter((i) => i.type === "revenue");
     const expenses = yearInvoices.filter((i) => i.type === "expense");
 
-    const tpsCollected = revenues
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tps_amount ?? 0), 0);
-
-    const tvqCollected = revenues
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tvq_amount ?? 0), 0);
-
-    const tpsCTI = expenses
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tps_amount ?? 0), 0);
-
-    const tvqRTI = expenses
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => s + (i.tvq_amount ?? 0), 0);
-
-    const tpsNet = tpsCollected - tpsCTI;
-    const tvqNet = tvqCollected - tvqRTI;
+    const { tpsCollected, tvqCollected, tpsCTI, tvqRTI, tpsNet, tvqNet } = computeTaxLineTotals(yearInvoices);
 
     // HT = amount_cad - tps - tvq (même logique que rapport d'impôt original)
     const totalRevenue = revenues.reduce(
@@ -46,25 +30,14 @@ export function TaxSummary({ invoices, year, totalCCA = 0 }: { invoices: Invoice
       0
     );
 
-    const htRevenue = revenues
-      .filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE))
-      .reduce((s, i) => {
-        const ht = (i.amount_cad ?? 0) - (i.tps_amount ?? 0) - (i.tvq_amount ?? 0);
-        return s + ht;
-      }, 0);
-
-    const expectedTPS = htRevenue * TPS_RATE;
-    const expectedTVQ = htRevenue * TVQ_RATE;
-
     return {
       tpsCollected, tvqCollected, tpsCTI, tvqRTI, tpsNet, tvqNet,
-      totalRevenue, totalExpenses, htRevenue,
-      expectedTPS, expectedTVQ,
+      totalRevenue, totalExpenses,
       taxableRevenues: revenues.filter((i) => isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE)).length,
       preRegExpenses: expenses.filter((i) => !isAfterDate(i.invoice_date, TAX_REGISTRATION_DATE)).length,
       beneficeNet: totalRevenue - totalExpenses - totalCCA,
     };
-  }, [invoices, year]);
+  }, [invoices, year, totalCCA]);
 
   const rows = [
     {
