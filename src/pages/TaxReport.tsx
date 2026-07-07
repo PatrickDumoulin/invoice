@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useInvoices } from "@/hooks/useInvoices";
 import { useAssets, computeCCA } from "@/hooks/useAssets";
 import { TaxSummary } from "@/components/TaxSummary";
+import { QuarterlyTaxDeclaration } from "@/components/QuarterlyTaxDeclaration";
 import { InvoiceAudit } from "@/components/InvoiceAudit";
 import { InvoiceReconciliation } from "@/components/InvoiceReconciliation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -305,6 +306,7 @@ export function TaxReport() {
       <Tabs defaultValue="sommaire">
         <TabsList>
           <TabsTrigger value="sommaire">Sommaire taxes</TabsTrigger>
+          <TabsTrigger value="trimestriel">Déclaration trimestrielle</TabsTrigger>
           <TabsTrigger value="amortissement">Amortissement (DPA)</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
           <TabsTrigger value="reconciliation">Réconciliation</TabsTrigger>
@@ -313,6 +315,10 @@ export function TaxReport() {
 
         <TabsContent value="sommaire" className="mt-4">
           <TaxSummary invoices={yearInvoices} year={year} totalCCA={totalCCA} />
+        </TabsContent>
+
+        <TabsContent value="trimestriel" className="mt-4">
+          <QuarterlyTaxDeclaration invoices={yearInvoices} year={year} />
         </TabsContent>
 
         <TabsContent value="amortissement" className="mt-4">
