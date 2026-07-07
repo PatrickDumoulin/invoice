@@ -15,7 +15,11 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # npm ci hits a known cross-platform/cross-npm-version bug with optional
+      # dependencies (npm/cli#4828) — it tries to install esbuild's binary for
+      # unrelated platforms (e.g. aix-ppc64) and fails. npm install resolves
+      # correctly every time.
+      - run: npm install
 
       - run: npm test
 
