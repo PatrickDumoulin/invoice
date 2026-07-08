@@ -355,6 +355,12 @@ serve(async (req) => {
       amountCad = extracted.amount * exchangeRate;
     }
 
+    // tps_amount/tvq_amount are extracted in the invoice's original currency (same as `amount`),
+    // so they must be converted the same way as amount_cad — otherwise every downstream tax
+    // total (audit, reconciliation, quarterly declaration) silently mixes CAD and foreign amounts.
+    const tpsAmountCad = (extracted.tps_amount ?? 0) * exchangeRate;
+    const tvqAmountCad = (extracted.tvq_amount ?? 0) * exchangeRate;
+
     const { error: updateError } = await supabase
       .from("invoices")
       .update({
@@ -365,8 +371,8 @@ serve(async (req) => {
         description: extracted.description,
         amount_cad: amountCad,
         exchange_rate: exchangeRate,
-        tps_amount: extracted.tps_amount ?? 0,
-        tvq_amount: extracted.tvq_amount ?? 0,
+        tps_amount: tpsAmountCad,
+        tvq_amount: tvqAmountCad,
         expense_category: extracted.expense_category ?? null,
         raw_extraction: extracted,
         status: invoice.status === "pending_review" ? "pending_review" : "processed",
@@ -390,6 +396,8 @@ serve(async (req) => {
           exchange_rate: exchangeRate,
           exchange_source: exchangeSource,
           exchange_rate_date: exchangeRateDate,
+          tps_amount: tpsAmountCad,
+          tvq_amount: tvqAmountCad,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
