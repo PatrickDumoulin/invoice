@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { computeHT, formatCurrency, formatDateShort, isAfterDate } from "@/lib/utils";
+import { computeHT, formatCurrency, isAfterDate } from "@/lib/utils";
 import { TPS_RATE, TVQ_RATE, TAX_REGISTRATION_DATE, type Invoice } from "@/types";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
 
@@ -24,14 +24,23 @@ export function InvoiceReconciliation({ invoices }: { invoices: Invoice[] }) {
       tvqPaid: taxExpenses.reduce((s, i) => s + (i.tvq_amount ?? 0), 0),
     };
 
-    const htRevenue = taxRevenues.reduce((s, i) => s + computeHT(i.amount_cad, i.tps_amount, i.tvq_amount), 0);
-    const htExpenses = taxExpenses.reduce((s, i) => s + computeHT(i.amount_cad, i.tps_amount, i.tvq_amount), 0);
+    // Method 2 recomputes "expected" tax as HT × standard rate — that's only a meaningful
+    // check against invoices that actually had that specific tax charged. Many vendors
+    // (foreign SaaS in particular) legitimately charge no TPS/TVQ at all, and some charge
+    // only one of the two (e.g. registered for GST but not QST) — so TPS and TVQ each need
+    // their own HT base, not a shared one, or one tax's "expected" total gets inflated by
+    // HT from invoices that never had it charged. Same per-invoice filter InvoiceAudit.tsx
+    // already applies — kept consistent here for the aggregate check.
+    const htFor = (list: Invoice[], field: "tps_amount" | "tvq_amount") =>
+      list
+        .filter((i) => (i[field] ?? 0) > 0)
+        .reduce((s, i) => s + computeHT(i.amount_cad, i.tps_amount, i.tvq_amount), 0);
 
     const method2 = {
-      tpsCollected: htRevenue * TPS_RATE,
-      tvqCollected: htRevenue * TVQ_RATE,
-      tpsPaid: htExpenses * TPS_RATE,
-      tvqPaid: htExpenses * TVQ_RATE,
+      tpsCollected: htFor(taxRevenues, "tps_amount") * TPS_RATE,
+      tvqCollected: htFor(taxRevenues, "tvq_amount") * TVQ_RATE,
+      tpsPaid: htFor(taxExpenses, "tps_amount") * TPS_RATE,
+      tvqPaid: htFor(taxExpenses, "tvq_amount") * TVQ_RATE,
     };
 
     const tpsCollectedDiff = Math.abs(method1.tpsCollected - method2.tpsCollected);
@@ -46,19 +55,9 @@ export function InvoiceReconciliation({ invoices }: { invoices: Invoice[] }) {
       tpsPaidDiff < THRESHOLD &&
       tvqPaidDiff < THRESHOLD;
 
-    // Per-invoice check: HT + TPS + TVQ must equal amount_cad for ALL processed invoices
-    const perInvoiceIssues = [...revenues, ...expenses].filter((i) => {
-      const total = (i.amount_cad ?? 0);
-      const sumParts = ((i.amount_cad ?? 0) - (i.tps_amount ?? 0) - (i.tvq_amount ?? 0)) +
-        (i.tps_amount ?? 0) + (i.tvq_amount ?? 0);
-      return Math.abs(total - sumParts) > 0.02;
-    });
-
     return {
       method1, method2, reconciled,
       tpsCollectedDiff, tvqCollectedDiff, tpsPaidDiff, tvqPaidDiff,
-      perInvoiceIssues,
-      htRevenue, htExpenses,
       taxRevenueCount: taxRevenues.length,
       taxExpenseCount: taxExpenses.length,
     };
@@ -134,22 +133,6 @@ export function InvoiceReconciliation({ invoices }: { invoices: Invoice[] }) {
             </tbody>
           </table>
         </div>
-
-        {rec.perInvoiceIssues.length > 0 && (
-          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p className="text-sm font-medium text-yellow-800 mb-2">
-              {rec.perInvoiceIssues.length} facture(s) avec HT+TPS+TVQ ≠ TTC :
-            </p>
-            <ul className="text-xs text-yellow-700 space-y-1">
-              {rec.perInvoiceIssues.slice(0, 5).map((i) => (
-                <li key={i.id}>• {i.company_name ?? i.file_name} ({formatDateShort(i.invoice_date)})</li>
-              ))}
-              {rec.perInvoiceIssues.length > 5 && (
-                <li>… et {rec.perInvoiceIssues.length - 5} autre(s)</li>
-              )}
-            </ul>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
