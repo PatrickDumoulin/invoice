@@ -35,17 +35,19 @@ function buildSummaryText(period: QuarterPeriod, data: QuarterData, year: number
     `Période : du ${fmtDate(period.start)} au ${fmtDate(period.end)}`,
     `Échéance de production : ${fmtDate(period.deadline)}`,
     ``,
-    `Ligne 101 — Total des fournitures (chiffre d'affaires, taxes exclues) : ${$(data.line101)}`,
+    `Étape "Fournitures" — Total des fournitures (chiffre d'affaires, taxes exclues) : ${$(data.line101)}`,
     ``,
-    `TPS/TVH`,
-    `  Ligne 103 — TPS perçue : ${$(data.line103)}`,
-    `  Ligne 106 — CTI (TPS payée sur achats) : ${$(data.line106)}`,
-    `  Ligne 109 (= 113) — TPS nette : ${$(data.line109)}`,
+    `Étape "Déclaration de la TPS/TVH"`,
+    `  Ligne 105 — TPS/TVH exigible et redressements : ${$(data.line103)}`,
+    `  Ligne 108 — CTI et redressements : ${$(data.line106)}`,
+    `  Ligne 109 — TPS/TVH nette (calculée automatiquement par "Calculer") : ${$(data.line109)}`,
     ``,
-    `TVQ`,
-    `  Ligne 203 — TVQ perçue : ${$(data.line203)}`,
-    `  Ligne 206 — RTI (TVQ payée sur achats) : ${$(data.line206)}`,
-    `  Ligne 209 (= 213) — TVQ nette : ${$(data.line209)}`,
+    `Étape "Déclaration de la TVQ"`,
+    `  Ligne 205 — TVQ exigible et redressements : ${$(data.line203)}`,
+    `  Ligne 208 — RTI et redressements : ${$(data.line206)}`,
+    `  Ligne 209 — TVQ nette (calculée automatiquement par "Calculer") : ${$(data.line209)}`,
+    ``,
+    `Les autres champs (135, 136, 1301, 111, 114, 115) ne s'appliquent pas à cette entreprise — laisse-les vides.`,
     ``,
     verdict,
   ].join("\n");
@@ -121,26 +123,33 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
           </Alert>
         )}
 
-        <LineRow line="101" label="Total des fournitures (chiffre d'affaires, taxes exclues)" value={data.line101} />
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Étape « Fournitures » de Mon dossier</p>
+          <LineRow line="101" label="Total des fournitures (chiffre d'affaires, taxes exclues)" value={data.line101} />
+        </div>
 
         <Separator />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">TPS/TVH</p>
-            <LineRow line="103" label="TPS perçue" value={data.line103} />
-            <LineRow line="106" label="CTI (TPS sur achats)" value={data.line106} />
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Déclaration de la TPS/TVH</p>
+            <LineRow line="105" label="TPS/TVH exigible et redressements" value={data.line103} />
+            <LineRow line="108" label="CTI et redressements" value={data.line106} />
             <Separator className="my-1.5" />
-            <LineRow line="109 / 113" label="TPS nette" value={data.line109} bold />
+            <LineRow line="109" label="TPS/TVH nette (auto — bouton « Calculer »)" value={data.line109} bold />
           </div>
           <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">TVQ</p>
-            <LineRow line="203" label="TVQ perçue" value={data.line203} />
-            <LineRow line="206" label="RTI (TVQ sur achats)" value={data.line206} />
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Déclaration de la TVQ</p>
+            <LineRow line="205" label="TVQ exigible et redressements" value={data.line203} />
+            <LineRow line="208" label="RTI et redressements" value={data.line206} />
             <Separator className="my-1.5" />
-            <LineRow line="209 / 213" label="TVQ nette" value={data.line209} bold />
+            <LineRow line="209" label="TVQ nette (auto — bouton « Calculer »)" value={data.line209} bold />
           </div>
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          Les autres champs de Mon dossier (135, 136, 1301, 111, 114, 115) ne s'appliquent pas à cette entreprise — laisse-les vides.
+        </p>
 
         <Separator />
 
@@ -253,21 +262,27 @@ async function exportQuarterlyPDF(periods: QuarterPeriod[], dataByQuarter: Quart
       y += 3;
     }
 
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Etape "Fournitures" de Mon dossier :', L, y);
+    doc.setTextColor(0, 0, 0);
+    y += 4;
     row("101", "Total des fournitures (chiffre d'affaires, taxes exclues)", data.line101, true);
     y += 3;
 
-    secHeader("TPS/TVH");
-    row("103", "TPS percue", data.line103);
-    row("106", "CTI (TPS sur achats)", data.line106);
+    secHeader("Declaration de la TPS/TVH");
+    row("105", "TPS/TVH exigible et redressements", data.line103);
+    row("108", "CTI et redressements", data.line106);
     divider();
-    row("109 / 113", "TPS nette", data.line109, true);
+    row("109", "TPS/TVH nette (auto - bouton Calculer)", data.line109, true);
     y += 3;
 
-    secHeader("TVQ");
-    row("203", "TVQ percue", data.line203);
-    row("206", "RTI (TVQ sur achats)", data.line206);
+    secHeader("Declaration de la TVQ");
+    row("205", "TVQ exigible et redressements", data.line203);
+    row("208", "RTI et redressements", data.line206);
     divider();
-    row("209 / 213", "TVQ nette", data.line209, true);
+    row("209", "TVQ nette (auto - bouton Calculer)", data.line209, true);
     y += 5;
 
     const isRefund = data.total < -0.005;
@@ -281,6 +296,13 @@ async function exportQuarterlyPDF(periods: QuarterPeriod[], dataByQuarter: Quart
     doc.text(label, L + 4, y + 8);
     doc.text($(Math.abs(data.total)), R - 4, y + 8, { align: "right" });
     y += 18;
+
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Autres champs de Mon dossier (135, 136, 1301, 111, 114, 115) : ne s'appliquent pas, laisser vides.", L, y);
+    doc.setTextColor(0, 0, 0);
+    y += 5;
 
     if (data.excludedPreRegistration > 0) {
       doc.setFont("helvetica", "italic");
@@ -330,8 +352,9 @@ export function QuarterlyTaxDeclaration({ invoices, year }: { invoices: Invoice[
       <Alert>
         <Info className="w-4 h-4" />
         <AlertDescription>
-          Chaque montant ci-dessous correspond exactement à une ligne du formulaire FPZ-500 de Revenu Québec
-          (Déclaration de la TPS/TVH et de la TVQ). Reporte les valeurs aux mêmes numéros de ligne.
+          Chaque montant ci-dessous correspond à un champ précis dans Mon dossier (Revenu Québec) →
+          Produire une déclaration de TPS/TVH et de TVQ. Copie les valeurs aux mêmes numéros de ligne,
+          clique « Calculer » sur le site pour obtenir le montant net automatiquement.
         </AlertDescription>
       </Alert>
 
