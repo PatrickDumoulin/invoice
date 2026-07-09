@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { fmtDate, isoLocal, getQuarterPeriods, computeQuarterData, type QuarterPeriod, type QuarterData } from "@/lib/quarterlyTax";
 import { TAX_REGISTRATION_DATE, type Invoice, type TaxFiling } from "@/types";
@@ -65,12 +67,35 @@ function LineRow({ line, label, value, bold }: { line: string; label: string; va
   );
 }
 
+interface ChecklistItem {
+  key: string;
+  line: string;
+  label: string;
+  value: number;
+}
+
+function buildChecklist(data: QuarterData): ChecklistItem[] {
+  return [
+    { key: "101", line: "101", label: "Fournitures (chiffre d'affaires)", value: data.line101 },
+    { key: "105", line: "105", label: "TPS/TVH exigible et redressements", value: data.line103 },
+    { key: "108", line: "108", label: "CTI et redressements", value: data.line106 },
+    { key: "205", line: "205", label: "TVQ exigible et redressements", value: data.line203 },
+    { key: "208", line: "208", label: "RTI et redressements", value: data.line206 },
+    { key: "total", line: "—", label: "Total à remettre / remboursement", value: data.total },
+  ];
+}
+
 function QuarterCard({ period, data, year, today, filing }: { period: QuarterPeriod; data: QuarterData; year: number; today: Date; filing?: TaxFiling }) {
   const status = statusOf(period, today);
   const isRefund = data.total < -0.005;
   const isNil = Math.abs(data.total) <= 0.005;
   const markFiled = useMarkFiled();
   const unmarkFiled = useUnmarkFiled();
+  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+
+  const checklist = useMemo(() => buildChecklist(data), [data]);
+  const allChecked = checklist.every((item) => checked.has(item.key));
 
   const amountsChangedSinceFiling =
     filing != null &&
@@ -79,6 +104,21 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
   function copySummary() {
     navigator.clipboard.writeText(buildSummaryText(period, data, year));
     toast.success("Résumé copié — prêt à coller dans tes notes");
+  }
+
+  function toggleChecked(key: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function confirmFiled() {
+    markFiled.mutate({ year, quarter: period.q, net_tps: data.line109, net_tvq: data.line209 });
+    setChecklistOpen(false);
+    setChecked(new Set());
   }
 
   return (
@@ -192,7 +232,7 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
               size="sm"
               className="gap-1.5"
               disabled={markFiled.isPending}
-              onClick={() => markFiled.mutate({ year, quarter: period.q, net_tps: data.line109, net_tvq: data.line209 })}
+              onClick={() => setChecklistOpen(true)}
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               Marquer {period.label.split(" —")[0]} comme déclaré
@@ -200,6 +240,38 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
           )}
         </div>
       </CardContent>
+
+      <Dialog open={checklistOpen} onOpenChange={setChecklistOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vérifier avant de marquer comme déclaré</DialogTitle>
+            <DialogDescription>
+              Compare chaque ligne avec ce que tu as entré dans Mon dossier (Revenu Québec), puis coche-la.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {checklist.map((item) => (
+              <label key={item.key} className="flex items-center gap-3 cursor-pointer">
+                <Checkbox checked={checked.has(item.key)} onCheckedChange={() => toggleChecked(item.key)} />
+                <span className="flex-1 text-sm">
+                  {item.line !== "—" && <span className="font-mono text-xs text-muted-foreground mr-1.5">L.{item.line}</span>}
+                  {item.label}
+                </span>
+                <span className="text-sm font-medium">{formatCurrency(item.value)}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setChecklistOpen(false)}>
+              Annuler
+            </Button>
+            <Button size="sm" disabled={!allChecked || markFiled.isPending} onClick={confirmFiled} className="gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Confirmer et marquer comme déclaré
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
