@@ -8,9 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { fmtDate, isoLocal, getQuarterPeriods, computeQuarterData, type QuarterPeriod, type QuarterData } from "@/lib/quarterlyTax";
-import { TAX_REGISTRATION_DATE, type Invoice, type TaxFiling } from "@/types";
+import { TAX_REGISTRATION_DATE, type Invoice, type TaxFiling, type TaxDocument } from "@/types";
 import { useTaxFilings, useMarkFiled, useUnmarkFiled } from "@/hooks/useTaxFilings";
-import { Info, Copy, FileText, CheckCircle2, Undo2 } from "lucide-react";
+import { useTaxDocuments, useUploadTaxDocument } from "@/hooks/useTaxDocuments";
+import { supabase } from "@/lib/supabase";
+import { Info, Copy, FileText, CheckCircle2, Undo2, Paperclip, Download } from "lucide-react";
 import { toast } from "sonner";
 
 function statusOf(period: QuarterPeriod, today: Date): { label: string; variant: "outline" | "default" | "destructive" | "secondary" } {
@@ -85,14 +87,21 @@ function buildChecklist(data: QuarterData): ChecklistItem[] {
   ];
 }
 
-function QuarterCard({ period, data, year, today, filing }: { period: QuarterPeriod; data: QuarterData; year: number; today: Date; filing?: TaxFiling }) {
+function QuarterCard({
+  period, data, year, today, filing, documents,
+}: {
+  period: QuarterPeriod; data: QuarterData; year: number; today: Date; filing?: TaxFiling; documents: TaxDocument[];
+}) {
   const status = statusOf(period, today);
   const isRefund = data.total < -0.005;
   const isNil = Math.abs(data.total) <= 0.005;
   const markFiled = useMarkFiled();
   const unmarkFiled = useUnmarkFiled();
+  const uploadDoc = useUploadTaxDocument();
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [confirmationFile, setConfirmationFile] = useState<File | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const checklist = useMemo(() => buildChecklist(data), [data]);
   const allChecked = checklist.every((item) => checked.has(item.key));
@@ -115,10 +124,36 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
     });
   }
 
-  function confirmFiled() {
-    markFiled.mutate({ year, quarter: period.q, net_tps: data.line109, net_tvq: data.line209 });
-    setChecklistOpen(false);
-    setChecked(new Set());
+  async function confirmFiled() {
+    setConfirming(true);
+    try {
+      if (confirmationFile) {
+        await uploadDoc.mutateAsync({
+          file: confirmationFile,
+          documentType: "tps_tvh",
+          taxYear: year,
+          quarter: period.q,
+          notes: `Accusé de réception — ${period.label.split(" —")[0]} ${year}`,
+        });
+      }
+      await markFiled.mutateAsync({ year, quarter: period.q, net_tps: data.line109, net_tvq: data.line209 });
+      setChecklistOpen(false);
+      setChecked(new Set());
+      setConfirmationFile(null);
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function downloadDoc(doc: TaxDocument) {
+    const { data: blob, error } = await supabase.storage.from("tax-documents").download(doc.file_path);
+    if (error || !blob) { toast.error("Impossible de télécharger le fichier"); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = doc.file_name;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -161,6 +196,22 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
               (1er décembre 2025) et ne sont pas incluses.
             </AlertDescription>
           </Alert>
+        )}
+
+        {documents.length > 0 && (
+          <div className="space-y-1">
+            {documents.map((doc) => (
+              <button
+                key={doc.id}
+                onClick={() => downloadDoc(doc)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <Paperclip className="w-3 h-3" />
+                {doc.file_name}
+                <Download className="w-3 h-3" />
+              </button>
+            ))}
+          </div>
         )}
 
         <div>
@@ -260,14 +311,31 @@ function QuarterCard({ period, data, year, today, filing }: { period: QuarterPer
                 <span className="text-sm font-medium">{formatCurrency(item.value)}</span>
               </label>
             ))}
+
+            <Separator />
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Accusé de réception (optionnel)
+              </label>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => setConfirmationFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:bg-background file:px-2 file:py-1 file:text-xs"
+              />
+              {confirmationFile && (
+                <p className="text-xs text-muted-foreground">{confirmationFile.name} sera attaché à ce trimestre.</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setChecklistOpen(false)}>
               Annuler
             </Button>
-            <Button size="sm" disabled={!allChecked || markFiled.isPending} onClick={confirmFiled} className="gap-1.5">
+            <Button size="sm" disabled={!allChecked || confirming} onClick={confirmFiled} className="gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Confirmer et marquer comme déclaré
+              {confirming ? "Enregistrement…" : "Confirmer et marquer comme déclaré"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -403,6 +471,7 @@ export function QuarterlyTaxDeclaration({ invoices, year }: { invoices: Invoice[
   const periods = useMemo(() => getQuarterPeriods(year), [year]);
   const registrationDate = useMemo(() => new Date(TAX_REGISTRATION_DATE), []);
   const { data: filings = [] } = useTaxFilings();
+  const { data: documents = [] } = useTaxDocuments();
 
   const visiblePeriods = periods.filter((p) => p.endISO >= TAX_REGISTRATION_DATE);
   const dataByQuarter = visiblePeriods.map((p) => computeQuarterData(invoices, p));
@@ -450,6 +519,7 @@ export function QuarterlyTaxDeclaration({ invoices, year }: { invoices: Invoice[
           year={year}
           today={today}
           filing={filings.find((f) => f.year === year && f.quarter === period.q)}
+          documents={documents.filter((d) => d.tax_year === year && d.quarter === period.q)}
         />
       ))}
     </div>

@@ -69,6 +69,7 @@ export interface TaxDocument {
   file_path: string;
   document_type: string | null;
   tax_year: number;
+  quarter: 1 | 2 | 3 | 4 | null;
   notes: string | null;
   created_at: string;
 }
